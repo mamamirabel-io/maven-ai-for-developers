@@ -1,0 +1,17 @@
+services:
+  web:
+    image: web:latest
+    build:
+      context: ./web
+      target: development
+    volumes:
+      - ./web:/app
+      - /app/node_modules
+    ports:
+      - 5173:5173
+    restart: unless-stopped
+    healthcheck:
+      test: "curl http://localhost:5173/ || exit 1"
+      interval: 5s
+      timeout: 10s
+      retries: 25
