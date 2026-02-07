@@ -5,6 +5,7 @@ import {
   IconInnerShadowTop,
   IconSparkles,
   IconCards,
+  IconSettings,
 } from "@tabler/icons-react"
 
 import { NavDocuments } from "@/components/nav-documents"
@@ -49,6 +50,11 @@ const data = {
       name: "Flashcards",
       url: "/flashcards",
       icon: IconCards,
+    },
+    {
+      name: "Settings",
+      url: "/settings",
+      icon: IconSettings,
     },
   ],
 }

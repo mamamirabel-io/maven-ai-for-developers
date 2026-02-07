@@ -1,0 +1,21 @@
+translate_word:
+  description: >
+    Translate the word "{word}" from {source_language} to {target_language}.
+    
+    Consider the user's context: {user_context}
+    
+    Provide:
+    1. Primary translation(s) - the most common translation(s)
+    2. Alternative translations - if the word has multiple meanings
+    3. Context examples - 2-3 example sentences showing usage in {target_language}
+    4. Usage notes - any important cultural or grammatical notes
+    
+    Format your response as a structured JSON that includes:
+    - primary_translation: string
+    - alternative_translations: array of strings (optional)
+    - examples: array of objects with "sentence" and "translation" fields
+    - notes: string (optional)
+  expected_output: >
+    A comprehensive translation response in JSON format with primary translation,
+    alternatives, contextual examples, and usage notes.
+  agent: translator
