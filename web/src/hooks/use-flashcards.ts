@@ -61,30 +61,31 @@ export function useFlashcards() {
     try {
       setLoading(true)
       
-      // First, get all words with their progress if any
+      // Get all words
       const { data: wordsData, error: wordsError } = await supabase
         .from('words')
-        .select(`
-          id, 
-          word, 
-          translation,
-          flashcard_progress!left(
-            next_review_date,
-            ease_factor,
-            interval_days,
-            repetitions,
-            correct_count,
-            incorrect_count
-          )
-        `)
+        .select('id, word, translation')
         .order('word')
 
       if (wordsError) throw wordsError
 
+      // Get user's progress for all words
+      const { data: progressData, error: progressError } = await supabase
+        .from('flashcard_progress')
+        .select('word_id, next_review_date, ease_factor, interval_days, repetitions')
+        .eq('user_id', user.id)
+
+      if (progressError) throw progressError
+
+      // Create a map of word_id to progress
+      const progressMap = new Map(
+        (progressData || []).map(p => [p.word_id, p])
+      )
+
       // Prioritize words: due for review > new words > future words
       const now = new Date().toISOString()
       const processedWords = (wordsData || []).map((word: any) => {
-        const progress = word.flashcard_progress?.[0]
+        const progress = progressMap.get(word.id)
         return {
           id: word.id,
           word: word.word,
@@ -107,6 +108,7 @@ export function useFlashcards() {
       setWords(processedWords)
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to fetch words')
+      console.error('Fetch words error:', err)
     } finally {
       setLoading(false)
     }
@@ -144,12 +146,14 @@ export function useFlashcards() {
 
     try {
       // Check if progress record exists
-      const { data: existingProgress } = await supabase
+      const { data: existingProgress, error: progressError } = await supabase
         .from('flashcard_progress')
         .select('*')
         .eq('user_id', user.id)
         .eq('word_id', wordId)
-        .single()
+        .maybeSingle()
+
+      if (progressError) throw progressError
 
       if (existingProgress) {
         // Calculate new SRS values using the database function
@@ -161,7 +165,14 @@ export function useFlashcards() {
             p_quality: quality
           })
 
-        if (srsError) throw srsError
+        if (srsError) {
+          console.error('SRS calculation error:', srsError)
+          throw srsError
+        }
+
+        if (!srsData || srsData.length === 0) {
+          throw new Error('No SRS data returned from calculation')
+        }
 
         const newSRS = srsData[0]
 
@@ -190,7 +201,14 @@ export function useFlashcards() {
             p_quality: quality
           })
 
-        if (srsError) throw srsError
+        if (srsError) {
+          console.error('SRS calculation error:', srsError)
+          throw srsError
+        }
+
+        if (!srsData || srsData.length === 0) {
+          throw new Error('No SRS data returned from calculation')
+        }
 
         const newSRS = srsData[0]
 
@@ -219,10 +237,12 @@ export function useFlashcards() {
       // Move to next word
       nextWord()
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to record answer')
-      console.error('SRS error:', err)
+      const errorMessage = err instanceof Error ? err.message : 'Failed to record answer'
+      setError(errorMessage)
+      console.error('SRS error details:', err)
+      alert(`Error: ${errorMessage}`) // Show error to user for debugging
     }
-  }, [user, words, currentWordIndex, fetchStats, fetchWords])
+  }, [user, words, currentWordIndex, fetchStats, fetchWords, nextWord])
 
   // Navigate to next word
   const nextWord = useCallback(() => {
