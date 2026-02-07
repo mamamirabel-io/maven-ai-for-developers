@@ -55,9 +55,9 @@ begin
     v_ease_factor,
     v_interval_days,
     v_repetitions,
-    timezone('utc'::text, now() + (v_interval_days || ' days')::interval);
+    (now() at time zone 'utc' + (v_interval_days || ' days')::interval)::timestamp with time zone;
 end;
-$$ language plpgsql immutable;
+$$ language plpgsql;
 
 -- Comment on the columns
 comment on column public.flashcard_progress.next_review_date is 'Next scheduled review date for this word (SRS)';
