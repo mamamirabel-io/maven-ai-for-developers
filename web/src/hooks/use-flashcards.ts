@@ -1,3 +1,24 @@
+/**
+ * Flashcards Hook with Spaced Repetition System (SRS)
+ * 
+ * This hook implements the SM-2 algorithm for optimal flashcard review scheduling.
+ * 
+ * SRS Features:
+ * - Automatically adjusts review intervals based on performance
+ * - Prioritizes words that need more practice (due/overdue cards shown first)
+ * - Uses ease factor (1.30-2.50+) to personalize learning intervals
+ * - Resets struggling cards to reinforce learning
+ * 
+ * Algorithm:
+ * - Incorrect answers (quality 0): Reset repetitions, decrease ease factor
+ * - Correct answers (quality 4): Increase interval exponentially based on ease factor
+ * - Initial intervals: 1 day, 6 days, then calculated based on ease factor
+ * 
+ * Card Priority:
+ * 1. Due cards (next_review_date <= now) - needs immediate review
+ * 2. New cards (never practiced) - ready to learn
+ * 3. Future cards (scheduled for later) - already mastered recently
+ */
 import { useState, useEffect, useCallback } from 'react'
 import { supabase } from '@/lib/supabase'
 import { useUser } from '@/contexts/UserContext'
@@ -33,23 +54,63 @@ export function useFlashcards() {
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
 
-  // Fetch all words
+  // Fetch words prioritized by SRS - due words first, then new words
   const fetchWords = useCallback(async () => {
+    if (!user) return
+
     try {
       setLoading(true)
-      const { data, error } = await supabase
+      
+      // First, get all words with their progress if any
+      const { data: wordsData, error: wordsError } = await supabase
         .from('words')
-        .select('id, word, translation')
+        .select(`
+          id, 
+          word, 
+          translation,
+          flashcard_progress!left(
+            next_review_date,
+            ease_factor,
+            interval_days,
+            repetitions,
+            correct_count,
+            incorrect_count
+          )
+        `)
         .order('word')
 
-      if (error) throw error
-      setWords(data || [])
+      if (wordsError) throw wordsError
+
+      // Prioritize words: due for review > new words > future words
+      const now = new Date().toISOString()
+      const processedWords = (wordsData || []).map((word: any) => {
+        const progress = word.flashcard_progress?.[0]
+        return {
+          id: word.id,
+          word: word.word,
+          translation: word.translation,
+          nextReview: progress?.next_review_date || now,
+          isDue: !progress || new Date(progress.next_review_date) <= new Date(),
+          isNew: !progress
+        }
+      })
+
+      // Sort: due cards first, then new cards, then future cards
+      processedWords.sort((a: any, b: any) => {
+        if (a.isDue && !b.isDue) return -1
+        if (!a.isDue && b.isDue) return 1
+        if (a.isNew && !b.isNew) return -1
+        if (!a.isNew && b.isNew) return 1
+        return new Date(a.nextReview).getTime() - new Date(b.nextReview).getTime()
+      })
+
+      setWords(processedWords)
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to fetch words')
     } finally {
       setLoading(false)
     }
-  }, [])
+  }, [user])
 
   // Fetch user statistics
   const fetchStats = useCallback(async () => {
@@ -74,11 +135,12 @@ export function useFlashcards() {
     }
   }, [user])
 
-  // Record answer (correct or incorrect)
+  // Record answer (correct or incorrect) with SRS algorithm
   const recordAnswer = useCallback(async (isCorrect: boolean) => {
     if (!user || !words[currentWordIndex]) return
 
     const wordId = words[currentWordIndex].id
+    const quality = isCorrect ? 4 : 0 // SM-2 quality: 0 = failed, 4 = correct
 
     try {
       // Check if progress record exists
@@ -90,19 +152,49 @@ export function useFlashcards() {
         .single()
 
       if (existingProgress) {
-        // Update existing record
+        // Calculate new SRS values using the database function
+        const { data: srsData, error: srsError } = await supabase
+          .rpc('calculate_srs_interval', {
+            p_ease_factor: existingProgress.ease_factor,
+            p_interval_days: existingProgress.interval_days,
+            p_repetitions: existingProgress.repetitions,
+            p_quality: quality
+          })
+
+        if (srsError) throw srsError
+
+        const newSRS = srsData[0]
+
+        // Update existing record with SRS values
         const { error } = await supabase
           .from('flashcard_progress')
           .update({
             correct_count: existingProgress.correct_count + (isCorrect ? 1 : 0),
             incorrect_count: existingProgress.incorrect_count + (isCorrect ? 0 : 1),
+            ease_factor: newSRS.new_ease_factor,
+            interval_days: newSRS.new_interval_days,
+            repetitions: newSRS.new_repetitions,
+            next_review_date: newSRS.new_next_review_date,
             last_practiced_at: new Date().toISOString()
           })
           .eq('id', existingProgress.id)
 
         if (error) throw error
       } else {
-        // Create new record
+        // Calculate initial SRS values for new card
+        const { data: srsData, error: srsError } = await supabase
+          .rpc('calculate_srs_interval', {
+            p_ease_factor: 2.5,
+            p_interval_days: 0,
+            p_repetitions: 0,
+            p_quality: quality
+          })
+
+        if (srsError) throw srsError
+
+        const newSRS = srsData[0]
+
+        // Create new record with SRS values
         const { error } = await supabase
           .from('flashcard_progress')
           .insert({
@@ -110,21 +202,27 @@ export function useFlashcards() {
             word_id: wordId,
             correct_count: isCorrect ? 1 : 0,
             incorrect_count: isCorrect ? 0 : 1,
+            ease_factor: newSRS.new_ease_factor,
+            interval_days: newSRS.new_interval_days,
+            repetitions: newSRS.new_repetitions,
+            next_review_date: newSRS.new_next_review_date,
             last_practiced_at: new Date().toISOString()
           })
 
         if (error) throw error
       }
 
-      // Refresh stats
+      // Refresh stats and words (to update due cards)
       await fetchStats()
+      await fetchWords()
 
       // Move to next word
       nextWord()
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to record answer')
+      console.error('SRS error:', err)
     }
-  }, [user, words, currentWordIndex, fetchStats])
+  }, [user, words, currentWordIndex, fetchStats, fetchWords])
 
   // Navigate to next word
   const nextWord = useCallback(() => {
@@ -151,9 +249,11 @@ export function useFlashcards() {
   }, [])
 
   useEffect(() => {
-    fetchWords()
-    fetchStats()
-  }, [fetchWords, fetchStats])
+    if (user) {
+      fetchWords()
+      fetchStats()
+    }
+  }, [user, fetchWords, fetchStats])
 
   return {
     currentWord: words[currentWordIndex],
