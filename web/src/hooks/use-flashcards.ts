@@ -137,6 +137,30 @@ export function useFlashcards() {
     }
   }, [user])
 
+  // Navigate to next word
+  const nextWord = useCallback(() => {
+    setShowTranslation(false)
+    setCurrentWordIndex((prev) => (prev + 1) % words.length)
+  }, [words.length])
+
+  // Navigate to previous word
+  const previousWord = useCallback(() => {
+    setShowTranslation(false)
+    setCurrentWordIndex((prev) => (prev - 1 + words.length) % words.length)
+  }, [words.length])
+
+  // Toggle translation visibility
+  const toggleTranslation = useCallback(() => {
+    setShowTranslation((prev) => !prev)
+  }, [])
+
+  // Shuffle words
+  const shuffleWords = useCallback(() => {
+    setWords((prev) => [...prev].sort(() => Math.random() - 0.5))
+    setCurrentWordIndex(0)
+    setShowTranslation(false)
+  }, [])
+
   // Record answer (correct or incorrect) with SRS algorithm
   const recordAnswer = useCallback(async (isCorrect: boolean) => {
     if (!user || !words[currentWordIndex]) return
@@ -243,30 +267,6 @@ export function useFlashcards() {
       alert(`Error: ${errorMessage}`) // Show error to user for debugging
     }
   }, [user, words, currentWordIndex, fetchStats, fetchWords, nextWord])
-
-  // Navigate to next word
-  const nextWord = useCallback(() => {
-    setShowTranslation(false)
-    setCurrentWordIndex((prev) => (prev + 1) % words.length)
-  }, [words.length])
-
-  // Navigate to previous word
-  const previousWord = useCallback(() => {
-    setShowTranslation(false)
-    setCurrentWordIndex((prev) => (prev - 1 + words.length) % words.length)
-  }, [words.length])
-
-  // Toggle translation visibility
-  const toggleTranslation = useCallback(() => {
-    setShowTranslation((prev) => !prev)
-  }, [])
-
-  // Shuffle words
-  const shuffleWords = useCallback(() => {
-    setWords((prev) => [...prev].sort(() => Math.random() - 0.5))
-    setCurrentWordIndex(0)
-    setShowTranslation(false)
-  }, [])
 
   useEffect(() => {
     if (user) {
